@@ -15,6 +15,7 @@ if 'log_df' not in st.session_state:
     st.session_state.log_df = None
     st.session_state.raw_logs = None
     st.session_state.waf_insights = None
+    st.session_state.ollama_analysis = None
 
 # ----------------------------
 # 1. Azure Connection
@@ -109,7 +110,54 @@ def analyze_waf_logs(df):
     return insights
 
 # ----------------------------
-# 3. Fetch and Parse WAF Logs
+# 3. Ollama Analysis Functions
+# ----------------------------
+system_prompt = """You are a cybersecurity expert analyzing Azure FrontDoor WAF logs. 
+Provide detailed security analysis with:
+1. Threat identification
+2. Suspicious pattern detection
+3. Mitigation recommendations
+4. Attacker behavior insights"""
+
+def ask_ollama(query, model="deepseek-r1:7b", system_prompt=system_prompt, host="http://192.168.0.81:11434"):
+    """Improved Ollama chat API function"""
+    url = f"{host}/api/chat"
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": query})
+    payload = {"model": model, "messages": messages, "stream": False}
+    
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        return result["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        return f"Error connecting to Ollama: {e}"
+    except KeyError as e:
+        return f"Unexpected response format: {e}"
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+def analyze_with_ollama(logs_sample, specific_question=None):
+    """Analyze WAF logs using Ollama with chat API"""
+    prompt = f"""
+    Analyze these Azure FrontDoor WAF log entries:
+    
+    {logs_sample}
+    """
+    
+    if specific_question:
+        prompt += f"\n\nSpecific question to answer: {specific_question}"
+    
+    with st.spinner("🔍 AI is analyzing the logs (this may take a minute)..."):
+        response = ask_ollama(prompt)
+    
+    return response
+
+# ----------------------------
+# 4. Fetch and Parse WAF Logs
 # ----------------------------
 if hasattr(st.session_state, 'blob_client'):
     with st.expander("📂 Step 2: Fetch and Parse WAF Logs"):
@@ -185,7 +233,7 @@ if hasattr(st.session_state, 'blob_client'):
                     st.error(f"Error processing logs: {str(e)}")
 
 # ----------------------------
-# 4. Display WAF-Specific Results
+# 5. Display WAF-Specific Results
 # ----------------------------
 if st.session_state.log_df is not None:
     with st.expander("📊 WAF Log Results", expanded=True):
@@ -240,7 +288,7 @@ if st.session_state.log_df is not None:
         )
 
 # ----------------------------
-# 5. WAF Security Dashboard
+# 6. WAF Security Dashboard
 # ----------------------------
 if st.session_state.get('waf_insights'):
     with st.expander("🛡️ WAF Security Dashboard"):
@@ -290,10 +338,85 @@ if st.session_state.get('waf_insights'):
         else:
             st.write("No suspicious IPs detected")
 
+# ----------------------------
+# 7. AI Analysis Section
+# ----------------------------
+# ----------------------------
+# 7. AI Analysis Section
+# ----------------------------
+if st.session_state.log_df is not None:
+    st.write("---")  # Add a visual separator
+    st.subheader("🤖 AI-Powered Log Analysis (Ollama)")
+    st.write("Use AI to analyze the WAF logs for deeper insights")
+    
+    # Ollama settings - now as columns instead of expander
+    st.markdown("#### Ollama Settings")
+    col1, col2 = st.columns(2)
+    with col1:
+        ollama_host = st.text_input(
+            "Ollama Server URL",
+            value="http://192.168.0.81:11434",
+            help="URL where your Ollama server is running"
+        )
+        ollama_model = st.text_input(
+            "Model Name",
+            value="deepseek-r1:7b",
+            help="Name of the model to use (must be installed)"
+        )
+    with col2:
+        system_prompt = st.text_area(
+            "System Prompt",
+            value=system_prompt,
+            height=150,
+            help="Instructions for the AI model"
+        )
+    
+    analysis_type = st.radio(
+        "Analysis Type",
+        options=["General Security Analysis", "Answer Specific Question"],
+        index=0
+    )
+    
+    specific_question = ""
+    if analysis_type == "Answer Specific Question":
+        specific_question = st.text_input("Enter your question about the logs")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        sample_size = st.slider(
+            "Number of log entries to analyze",
+            min_value=10,
+            max_value=1000,
+            value=100,
+            help="Analyzing too many entries may take a long time"
+        )
+
+    
+    if st.button("Run AI Analysis"):
+        if len(st.session_state.log_df) < sample_size:
+            sample_df = st.session_state.log_df
+        else:
+            sample_df = st.session_state.log_df.sample(sample_size)
+        
+        st.session_state.ollama_analysis = analyze_with_ollama(
+            sample_df, 
+            specific_question
+        )
+    
+    if st.session_state.ollama_analysis:
+        st.subheader("AI Analysis Results")
+        st.markdown(st.session_state.ollama_analysis)
+        
+        st.download_button(
+            "💾 Download Analysis Report",
+            data=st.session_state.ollama_analysis,
+            file_name="waf_ai_analysis.txt"
+        )
 # Reset button
 if st.session_state.log_df is not None:
     if st.button("Clear Results"):
         st.session_state.log_df = None
         st.session_state.raw_logs = None
         st.session_state.waf_insights = None
+        st.session_state.ollama_analysis = None
         st.rerun()
