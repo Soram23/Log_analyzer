@@ -1,0 +1,10 @@
+streamlit==1.32.0
+azure-storage-blob==12.17.0
+pandas==2.0.3  # Downgraded to a version with pre-built wheels
+python-dotenv==1.0.0
+requests==2.31.0
+geoip2==4.8.0
+matplotlib==3.8.2
+plotly==5.18.0
+python-dateutil==2.8.2
+numpy==1.24.4  # Specific version known to work well
